@@ -3,16 +3,6 @@ import { $ } from "bun";
 const CONTAINER_NAME = "context-compacting-agent-exec";
 const COMMAND_TIMEOUT_SECONDS = 30;
 
-const DOCKER_RUN_ARGS = [
-  "-d",
-  `--name ${CONTAINER_NAME}`,
-  "--workdir /workspace",
-  "--memory 512m",
-  "--cpus 1",
-  "--pids-limit 64",
-  "--security-opt no-new-privileges",
-].join(" ");
-
 export async function ensureDockerContainer(): Promise<void> {
   try {
     const { stdout } = await $`docker ps -a --filter name=${CONTAINER_NAME} --format {{.Names}}`.quiet();
@@ -27,11 +17,11 @@ export async function ensureDockerContainer(): Promise<void> {
       return;
     }
 
-    await $`docker run ${DOCKER_RUN_ARGS} node:20-alpine sh -c "tail -f /dev/null"`.quiet();
+    await $`docker run -d --name ${CONTAINER_NAME} --workdir /workspace --memory 512m --cpus 1 --pids-limit 64 --security-opt no-new-privileges node:20-alpine sh -c "tail -f /dev/null"`.quiet();
   } catch (error) {
     try {
       await $`docker rm -f ${CONTAINER_NAME}`.quiet();
-      await $`docker run ${DOCKER_RUN_ARGS} node:20-alpine sh -c "tail -f /dev/null"`.quiet();
+      await $`docker run -d --name ${CONTAINER_NAME} --workdir /workspace --memory 512m --cpus 1 --pids-limit 64 --security-opt no-new-privileges node:20-alpine sh -c "tail -f /dev/null"`.quiet();
     } catch (recreateError) {
       throw new Error(`Failed to create Docker container: ${recreateError}`);
     }
