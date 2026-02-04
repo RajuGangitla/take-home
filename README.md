@@ -2,22 +2,56 @@
 
 A coding agent that automatically compacts conversation history when approaching context limits.
 
-## Setup
+## Run
 
 ```bash
 bun install
 bun run index.ts
 ```
 
-Requires Docker to be running.
+Requires Docker running.
 
 ## Environment Variables
 
-- `ANTHROPIC_API_KEY` - Required for the LLM
+Create `.env` file:
 
-## Notes
+```
+AI_GATEWAY_API_KEY=your_api_key_here
+```
 
-- Sessions persist to SQLite, so you can resume after restart
-- If Docker container crashes, the agent will attempt to recreate it
-- Long-running tasks may trigger multiple compaction cycles - this is expected
-- First run creates the database automatically
+Optional:
+```
+AI_GATEWAY_BASE_URL=https://ai-gateway.vercel.sh
+SESSION_ID=default
+```
+
+## Compaction Logic
+
+```
+Trigger:  Context ≥ 75% of limit
+          + At least 5 messages
+          + 1 min cooldown passed
+
+Action:   Keep recent 20% of messages
+          Summarize rest with Claude Haiku
+          Insert summary as system message
+
+Result:   ~25% context used → 75% free space
+```
+
+## File Structure
+
+```
+├── index.ts          # Entry point
+├── compaction.ts     # Compaction logic
+├── context.ts        # Context window config
+├── utils.ts          # Helpers
+├── constants.ts      # Constants
+├── prompts.ts        # System prompt
+├── tools.ts          # Agent tools (read/write/execute)
+├── docker.ts         # Container management
+├── db/
+│   ├── index.ts      # DB init
+│   └── schema.ts     # Schema
+└── sessions.db       # SQLite (auto-created)
+```
