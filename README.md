@@ -39,6 +39,8 @@ Action:   Keep recent 20% of messages
 Result:   ~25% context used → 75% free space
 ```
 
+**Note:** For testing, context limit is set to 2,500 tokens in `context.ts`. Change to 200,000 for production.
+
 ## File Structure
 
 ```
