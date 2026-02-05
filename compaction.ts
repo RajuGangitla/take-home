@@ -16,10 +16,6 @@ const TARGET_RATIO = 0.20;
 const MIN_MESSAGES_TO_COMPACT = 5;
 const COMPACTION_COOLDOWN_MS = 60000;
 
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
-
 export async function shouldCompactContext(
   sessionId: string,
   modelName: string,
@@ -79,7 +75,11 @@ export async function compactContext(
 
   for (let i = allMessages.length - 1; i >= 0; i--) {
     const m = allMessages[i];
-    const messageTokens = estimateTokens(m.content);
+    if (!m.tokenCount) {
+      console.warn(`[Compaction] Message ${m.id} missing tokenCount, skipping`);
+      continue;
+    }
+    const messageTokens = m.tokenCount;
 
     if (tokensUsed + messageTokens > targetAfterCompaction) {
       break;
@@ -103,14 +103,14 @@ export async function compactContext(
   }
 
   const tokensBeforeCompaction = allMessages.reduce(
-    (sum, m) => sum + estimateTokens(m.content), 
+    (sum, m) => sum + (m.tokenCount ?? 0), 
     0
   );
 
   const tokensToCompact = messagesToCompact
-    .reduce((sum, m) => sum + estimateTokens(m.content), 0);
+    .reduce((sum, m) => sum + (m.tokenCount ?? 0), 0);
   const tokensToKeep = messagesToKeep
-    .reduce((sum, m) => sum + estimateTokens(m.content), 0);
+    .reduce((sum, m) => sum + (m.tokenCount ?? 0), 0);
 
   console.log(`[Compaction] Starting...
     Total messages: ${allMessages.length}
@@ -198,7 +198,7 @@ Wrap your summary in <summary></summary> tags.`;
       const summaryCompletionTokens = usage?.outputTokens || 0;
       const summaryTotalTokens = usage?.totalTokens || (summaryPromptTokens + summaryCompletionTokens);
       
-      const summaryTokens = estimateTokens(summary);
+      const summaryTokens = summaryCompletionTokens;
       const tokensAfterCompaction = tokensUsed + summaryTokens;
       const tokensFreed = tokensBeforeCompaction - tokensAfterCompaction;
 

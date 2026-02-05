@@ -17,4 +17,5 @@ export const messages = sqliteTable("messages", {
   content: text("content").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   compacted: integer("compacted", { mode: "boolean" }).default(false),
+  tokenCount: integer("token_count"),
 });

@@ -22,6 +22,7 @@ export async function initDb() {
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       compacted INTEGER DEFAULT 0,
+      token_count INTEGER,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
     
@@ -52,6 +53,21 @@ export async function initDb() {
       try {
         sqlite.exec(`ALTER TABLE sessions ADD COLUMN last_compacted_at INTEGER;`);
         console.log('Added last_compacted_at column to existing database');
+      } catch (alterError: unknown) {
+        const alterErr = alterError instanceof Error ? alterError : new Error(String(alterError));
+        console.error('Failed to add column:', alterErr.message);
+      }
+    }
+  }
+
+  try {
+    sqlite.exec(`SELECT token_count FROM messages LIMIT 1`);
+  } catch (error: unknown) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    if (err.message?.includes('no such column')) {
+      try {
+        sqlite.exec(`ALTER TABLE messages ADD COLUMN token_count INTEGER;`);
+        console.log('Added token_count column to existing database');
       } catch (alterError: unknown) {
         const alterErr = alterError instanceof Error ? alterError : new Error(String(alterError));
         console.error('Failed to add column:', alterErr.message);

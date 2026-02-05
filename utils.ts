@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { sessions, messages } from "./db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { getMessagesForContext } from "./compaction";
 import { SYSTEM_PROMPT } from "./prompts";
 import { WORKSPACE_DIR, FORBIDDEN_PATHS, API_TIMEOUT_MS } from "./constants";
@@ -51,10 +51,6 @@ export function parseDirectoryListing(output: string) {
     .filter(item => item !== null);
 }
 
-export function estimatePromptTokens(messages: Array<{ role: string; content: string }>): number {
-  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-  return Math.floor(totalChars / 4);
-}
 
 export interface TokenUsage {
   inputTokens: number | undefined;
@@ -65,13 +61,14 @@ export function getContextTokensFromUsage(usage: TokenUsage): number {
   return usage.inputTokens ?? 0;
 }
 
-export async function saveMessage(sessionId: string, role: "user" | "assistant" | "system", content: string) {
+export async function saveMessage(sessionId: string, role: "user" | "assistant" | "system", content: string, tokenCount?: number) {
   await db.insert(messages).values({
     sessionId,
     role,
     content,
     createdAt: new Date(),
     compacted: false,
+    tokenCount: tokenCount ?? null,
   });
 }
 
@@ -90,8 +87,11 @@ export async function ensureSession(sessionId: string) {
 }
 
 export async function calculateContextTokens(sessionId: string): Promise<number> {
-  const conversationHistory = await getMessagesForContext(sessionId);
-  return conversationHistory.reduce((sum, m) => sum + estimatePromptTokens([m]), 0);
+  const allMessages = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.compacted, false)));
+  return allMessages.reduce((sum, m) => sum + (m.tokenCount ?? 0), 0);
 }
 
 export async function updateTokenCount(sessionId: string) {
@@ -115,11 +115,13 @@ export async function ensureSystemPrompt(sessionId: string, conversationHistory:
 }
 
 export async function processUserMessage(sessionId: string, userInput: string, modelName: string) {
+  const session = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+  const previousTokens = session[0]?.cumulativePromptTokens || 0;
+  
   await saveMessage(sessionId, "user", userInput);
   
   let conversationHistory = await getMessagesForContext(sessionId);
   
-  const session = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
   const storedTokens = session[0]?.cumulativePromptTokens || 0;
   const estimatedTokens = await calculateContextTokens(sessionId);
   
@@ -138,12 +140,12 @@ export async function processUserMessage(sessionId: string, userInput: string, m
 
 export async function handleAssistantResponse(
   sessionId: string, 
-  result: { text?: string; usage?: { inputTokens?: number; outputTokens?: number } }
+  result: { text?: string; usage?: { inputTokens?: number; outputTokens?: number } },
+  previousTokens: number
 ) {
   const assistantMessageContent = result.text?.trim() || "";
   
   if (assistantMessageContent) {
-    await saveMessage(sessionId, "assistant", assistantMessageContent);
     console.log(`\nAssistant: ${assistantMessageContent}\n`);
     
     if (result.usage && result.usage.inputTokens !== undefined) {
@@ -151,10 +153,15 @@ export async function handleAssistantResponse(
       const outputTokens = result.usage.outputTokens ?? 0;
       const totalTokens = inputTokens + outputTokens;
       
+      const userMessageTokens = inputTokens - previousTokens;
+      const assistantTokenCount = outputTokens;
+      
       console.log(`[Token Usage]
     Input (context): ${inputTokens} tokens
     Output: ${outputTokens} tokens
-    Total: ${totalTokens} tokens`);
+    Total: ${totalTokens} tokens
+    User message: ~${userMessageTokens} tokens
+    Assistant message: ${assistantTokenCount} tokens`);
       
       await db
         .update(sessions)
@@ -163,7 +170,24 @@ export async function handleAssistantResponse(
           updatedAt: new Date()
         })
         .where(eq(sessions.id, sessionId));
+      
+      const lastUserMessage = await db
+        .select()
+        .from(messages)
+        .where(and(eq(messages.sessionId, sessionId), eq(messages.role, "user")))
+        .orderBy(desc(messages.createdAt))
+        .limit(1);
+      
+      if (lastUserMessage.length > 0) {
+        await db
+          .update(messages)
+          .set({ tokenCount: userMessageTokens })
+          .where(eq(messages.id, lastUserMessage[0].id));
+      }
+      
+      await saveMessage(sessionId, "assistant", assistantMessageContent, assistantTokenCount);
     } else {
+      await saveMessage(sessionId, "assistant", assistantMessageContent);
       await updateTokenCount(sessionId);
     }
   }

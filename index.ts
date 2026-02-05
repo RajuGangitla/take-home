@@ -1,6 +1,8 @@
 import { generateText, stepCountIs } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { initDb } from "./db";
+import { initDb, db } from "./db";
+import { sessions } from "./db/schema";
+import { eq } from "drizzle-orm";
 import { getMessagesForContext } from "./compaction";
 import { ensureDockerContainer } from "./docker";
 import { createInterface } from "readline";
@@ -85,6 +87,9 @@ async function main() {
     }
 
     try {
+      const session = await db.select().from(sessions).where(eq(sessions.id, SESSION_ID)).limit(1);
+      const previousTokens = session[0]?.cumulativePromptTokens || 0;
+      
       const conversationHistory = await processUserMessage(SESSION_ID, userInput, MODEL_NAME);
       
       if (conversationHistory.length === 0) {
@@ -96,7 +101,7 @@ async function main() {
       await handleAssistantResponse(SESSION_ID, {
         text: result.text,
         usage: result.usage,
-      });
+      }, previousTokens);
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
       console.error("\n❌ [Error] An error occurred during generation:");
